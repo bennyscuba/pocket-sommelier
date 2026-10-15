@@ -1,0 +1,7 @@
+Plaintext
+
+streamlit
+google-genai
+supabase
+pydantic
+pillow
