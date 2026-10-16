@@ -45,9 +45,15 @@ with tab1:
                 "acidity": "Low, Medium, or High",
                 "body_type": "Light, Medium, or Full",
                 "drink_window": "e.g. Drink Now"
-            }"""
+            }
             
-            # Pure text call — no fragile schemas or config mime types to trigger 400/500 errors
+            For the quality_score, use a 1-5 integer scale based on the wine's profile and producer reputation:
+            - 1 = Bottom shelf / low quality (e.g., 2 buck chuck)
+            - 2 = Fine, but mediocre/ordinary
+            - 3 = Good, solid weekday drinking wine
+            - 4 = Higher quality wine for a special meal you cooked
+            - 5 = Premium bottle to hold for a special occasion"""
+            
             response = genai_client.models.generate_content(
                 model='gemini-flash-latest',
                 contents=[
@@ -59,7 +65,6 @@ with tab1:
                 ],
             )
             
-            # Clean any accidental markdown formatting and parse locally
             raw_text = response.text.strip()
             if raw_text.startswith("```json"):
                 raw_text = raw_text[7:]
@@ -69,9 +74,11 @@ with tab1:
                 raw_text = raw_text[:-3]
                 
             data = json.loads(raw_text.strip())
-            st.success(f"Identified: {data.get('vintage')} {data.get('producer')} {data.get('varietal')}")
             
-            # Review and add manual logistics (allow blanks)
+            score = data.get('quality_score', 3)
+            st.success(f"Identified: {data.get('vintage')} {data.get('producer')} {data.get('varietal')} | Quality Rating: {score}/5")
+            
+            # Review and add manual logistics
             with st.form("add_wine_form"):
                 st.subheader("Optional Logistics")
                 col1, col2 = st.columns(2)
@@ -85,7 +92,7 @@ with tab1:
                 if submitted:
                     supabase.table("wines").insert({
                         "wine_type": data.get("wine_type", "Unknown"),
-                        "quality_score": int(data.get("quality_score", 3)),
+                        "quality_score": int(score),
                         "producer": data.get("producer", "Unknown"),
                         "vintage": data.get("vintage", "Unknown"),
                         "varietal": data.get("varietal", "Unknown"),
@@ -106,7 +113,6 @@ with tab1:
 with tab2:
     meal = st.text_input("What's on the menu?", placeholder="e.g., Smoked brisket, fresh fish ceviche, mushroom risotto")
     if st.button("Find Pairing") and meal:
-        # Fetch active inventory
         response = supabase.table("wines").select("*").eq("is_consumed", False).gt("quantity", 0).execute()
         inventory = response.data
         
@@ -114,8 +120,7 @@ with tab2:
             st.warning("Your rack is currently empty.")
         else:
             with st.spinner("Finding the perfect structural match..."):
-                # Pass structural metrics to the AI
-                inventory_str = "\n".join([f"- {w['vintage']} {w['producer']} {w['varietal']} | Tannins: {w['tannin_level']}, Acidity: {w['acidity']}, Body: {w['body_type']}, Notes: {w['flavor_notes']}" for w in inventory])
+                inventory_str = "\n".join([f"- {w['vintage']} {w['producer']} {w['varietal']} (Quality: {w.get('quality_score', 'N/A')}/5) | Tannins: {w['tannin_level']}, Acidity: {w['acidity']}, Body: {w['body_type']}, Notes: {w['flavor_notes']}" for w in inventory])
                 
                 pairing_prompt = f"I am cooking: {meal}. Here is my active wine inventory with their structural metrics:\n{inventory_str}\n\nRecommend the single best match. Explain why the acidity, tannins, and body pair well with the specific preparation of this dish."
                 
@@ -128,7 +133,6 @@ with tab2:
 # --- TAB 3: MANAGE CELLAR ---
 with tab3:
     st.write("Log notes and update quantities after a meal.")
-    # Fetch active inventory to manage
     response = supabase.table("wines").select("*").eq("is_consumed", False).gt("quantity", 0).execute()
     wines = response.data
     
@@ -136,8 +140,8 @@ with tab3:
         st.info("No active bottles to manage.")
     else:
         for w in wines:
-            with st.expander(f"{w['vintage']} {w['producer']} {w['varietal']}"):
-                st.write(f"**Location:** {w['rack_location'] or 'Unassigned'} | **Window:** {w['drink_window']}")
+            with st.expander(f"{w['vintage']} {w['producer']} {w['varietal']} (★ {w.get('quality_score', 'N/A')}/5)"):
+                st.write(f"**Location:** {w['rack_location'] or 'Unassigned'} | **Window:** {w['drink_window']} | **Quality:** {w.get('quality_score', 'N/A')}/5")
                 
                 notes = st.text_area("Tasting Notes", key=f"notes_{w['wine_id']}", placeholder="How did it pair?")
                 if st.button("Mark Consumed", key=f"btn_{w['wine_id']}"):
