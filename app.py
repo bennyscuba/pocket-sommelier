@@ -60,7 +60,12 @@ class WineData(BaseModel):
         ),
     )
 
-
+class PairingRecommendation(BaseModel):
+    wine_id: int
+    reason: str
+    serving_temperature: str
+    decant: str
+    
 def analyze_wine_label(picture) -> dict:
     picture.seek(0)
     img = Image.open(picture).convert("RGB")
@@ -192,3 +197,188 @@ with tab1:
                 except Exception as exc:
                     st.error("The bottle could not be saved.")
                     st.code(f"{type(exc).__name__}: {exc}")
+
+# --- TAB 2: SOMMELIER PAIRING ---
+with tab2:
+    st.subheader("🍽️ Find a Wine for Dinner")
+
+    st.write(
+        "Describe what you're eating and I'll choose the best "
+        "pairing from bottles currently in your cellar."
+    )
+
+    meal = st.text_area(
+        "What's on the menu?",
+        placeholder=(
+            "e.g., Grilled ribeye with mushrooms and roasted potatoes"
+        ),
+        key="meal_description",
+    )
+
+    if st.button("Find Best Pairing", type="primary"):
+
+        if not meal.strip():
+            st.warning("Tell me what you're eating first.")
+
+        else:
+            try:
+                # Get all available bottles from Supabase
+                response = (
+                    supabase.table("wines")
+                    .select("*")
+                    .eq("is_consumed", False)
+                    .gt("quantity", 0)
+                    .execute()
+                )
+
+                inventory = response.data
+
+                if not inventory:
+                    st.warning(
+                        "There aren't any available bottles in your cellar."
+                    )
+
+                else:
+                    # Build a description of the available cellar
+                    inventory_str = "\n\n".join(
+                        [
+                            (
+                                f"WINE ID: {w['wine_id']}\n"
+                                f"Wine: {w['vintage']} "
+                                f"{w['producer']} "
+                                f"{w['varietal']}\n"
+                                f"Type: {w['wine_type']}\n"
+                                f"Region: {w['region']}\n"
+                                f"Tannins: {w['tannin_level']}\n"
+                                f"Acidity: {w['acidity']}\n"
+                                f"Body: {w['body_type']}\n"
+                                f"Flavor notes: {w['flavor_notes']}\n"
+                                f"Drink window: {w['drink_window']}\n"
+                                f"Quantity: {w['quantity']}"
+                            )
+                            for w in inventory
+                        ]
+                    )
+
+                    pairing_prompt = f"""
+You are my personal sommelier.
+
+DINNER:
+{meal}
+
+AVAILABLE WINES IN MY CELLAR:
+
+{inventory_str}
+
+Choose the SINGLE best wine from this inventory for this meal.
+
+IMPORTANT:
+You must choose one of the exact WINE IDs listed above.
+Do not recommend any wine that is not in the inventory.
+
+Consider:
+- acidity versus richness and fat
+- tannin versus protein and preparation
+- body of the wine versus weight of the dish
+- flavor compatibility
+- sauce and cooking method
+- drink window
+
+Explain specifically why the selected wine works with this meal.
+
+Also recommend:
+- an appropriate serving temperature
+- whether the bottle should be decanted and, if so, for how long
+"""
+
+                    with st.spinner(
+                        "Searching your cellar for the best match..."
+                    ):
+
+                        pairing_response = (
+                            genai_client.models.generate_content(
+                                model="gemini-flash-latest",
+                                contents=pairing_prompt,
+                                config=types.GenerateContentConfig(
+                                    response_mime_type="application/json",
+                                    response_schema=PairingRecommendation,
+                                ),
+                            )
+                        )
+
+                    # Validate Gemini's structured response
+                    pairing = (
+                        PairingRecommendation.model_validate_json(
+                            pairing_response.text
+                        )
+                    )
+
+                    # Find the actual Supabase bottle selected by Gemini
+                    selected_wine = next(
+                        (
+                            w for w in inventory
+                            if w["wine_id"] == pairing.wine_id
+                        ),
+                        None,
+                    )
+
+                    if selected_wine is None:
+                        st.error(
+                            "The sommelier selected a wine that "
+                            "couldn't be found in the current cellar."
+                        )
+
+                    else:
+                        # Save recommendation so Streamlit can retain it
+                        st.session_state["pairing_result"] = {
+                            "wine": selected_wine,
+                            "reason": pairing.reason,
+                            "temperature": pairing.serving_temperature,
+                            "decant": pairing.decant,
+                        }
+
+            except Exception as exc:
+                st.error("I couldn't search the cellar.")
+                st.code(f"{type(exc).__name__}: {exc}")
+
+
+    # Display recommendation
+    if "pairing_result" in st.session_state:
+
+        result = st.session_state["pairing_result"]
+        wine = result["wine"]
+
+        st.markdown("---")
+        st.subheader("🍷 My Recommendation")
+
+        st.markdown(
+            f"### {wine['vintage']} "
+            f"{wine['producer']} "
+            f"{wine['varietal']}"
+        )
+
+        st.write(f"**Region:** {wine['region']}")
+
+        st.write(
+            f"📍 **Cellar Location:** "
+            f"{wine['rack_location'] or 'Unassigned'}"
+        )
+
+        st.write(
+            f"🍾 **Bottles Remaining:** {wine['quantity']}"
+        )
+
+        st.markdown("#### Why this bottle")
+        st.write(result["reason"])
+
+        st.markdown("#### Serving Recommendation")
+
+        st.write(
+            f"🌡️ **Temperature:** "
+            f"{result['temperature']}"
+        )
+
+        st.write(
+            f"⏱️ **Decant:** "
+            f"{result['decant']}"
+        )
