@@ -43,13 +43,13 @@ with tab1:
                         data=img_bytes,
                         mime_type='image/jpeg',
                     ),
-        prompt,
-    ],
-    config=types.GenerateContentConfig(
-        response_mime_type="application/json",
-        response_schema=WineData,
-    ),
-)
+                    prompt,
+                ],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=WineData,
+                ),
+            )
             
             data = json.loads(response.text)
             st.success(f"Identified: {data['vintage']} {data['producer']} {data['varietal']}")
