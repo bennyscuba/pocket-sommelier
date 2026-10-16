@@ -31,14 +31,27 @@ with tab1:
     st.write("Scan a label to automatically extract and infer its profile.")
     picture = st.camera_input("Scan Wine Label")
     
-    if picture:
+if picture:
         with st.spinner("Analyzing label and inferring structural profile..."):
             img = Image.open(picture)
+            
+            # Convert PIL image to JPEG bytes for google-genai SDK
+            import io
+            img_byte_arr = io.BytesIO()
+            img.save(img_byte_arr, format='JPEG')
+            img_bytes = img_byte_arr.getvalue()
+
             prompt = "Extract the producer, vintage, varietal, and region. Then, infer the flavor notes, tannin level, acidity, body type, and ideal drink window based on the wine's profile."
             
             response = genai_client.models.generate_content(
-                model='gemini-1.5-flash',
-                contents=[img, prompt],
+                model='gemini-2.5-flash',
+                contents=[
+                    types.Part.from_bytes(
+                        data=img_bytes,
+                        mime_type='image/jpeg',
+                    ),
+                    prompt,
+                ],
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     response_schema=WineData,
