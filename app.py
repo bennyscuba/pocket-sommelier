@@ -22,7 +22,7 @@ supabase: Client = create_client(
 # Structured Gemini responses
 # -----------------------------------------------------------------------------
 class WineData(BaseModel):
-    wine_type: str = Field(description="Red, White, Rose, or Sparkling")
+    wine_type: str = Field(description="Red, White, Rose, Sparkling or Dessert")
     producer: str = Field(description="The winery or estate shown on the label")
     vintage: str = Field(description="The four-digit year, or NV for non-vintage")
     varietal: str = Field(description="The grape variety or blend")
@@ -52,8 +52,8 @@ class WineData(BaseModel):
 
 
 class PairingRecommendation(BaseModel):
-    wine_id: int = Field(description="The wine_id of the selected wine")
-    reason: str = Field(description="Why this specific wine pairs with the meal")
+    wine_id: str = Field(description="The exact wine_id of the selected wine")
+    reason: str = Field(description="Why this specific wine pairs with the request")
     serving_temperature: str = Field(description="Recommended serving temperature")
 
 
@@ -164,12 +164,22 @@ with tab1:
                 producer = st.text_input("Producer", value=data["producer"])
                 vintage = st.text_input("Vintage", value=data["vintage"])
                 varietal = st.text_input("Varietal", value=data["varietal"])
+                wine_types = [
+                    "Red",
+                    "White",
+                    "Rose",
+                    "Sparkling",
+                    "Dessert",
+                ]
+                
                 wine_type = st.selectbox(
                     "Wine Type",
-                    ["Red", "White", "Rose", "Sparkling"],
-                    index=["Red", "White", "Rose", "Sparkling"].index(data["wine_type"])
-                    if data["wine_type"] in ["Red", "White", "Rose", "Sparkling"]
-                    else 0,
+                    wine_types,
+                    index=(
+                        wine_types.index(data["wine_type"])
+                        if data["wine_type"] in wine_types
+                        else 0
+                    ),
                 )
                 region = st.text_input("Region", value=data["region"])
 
@@ -464,7 +474,7 @@ with tab2:
                     selected = next(
                         (
                             w for w in matches
-                            if int(w["wine_id"]) == int(recommendation.wine_id)
+                            if str(w["wine_id"]) == str(recommendation.wine_id)
                         ),
                         None,
                     )
@@ -563,7 +573,7 @@ with tab3:
                         ).eq("wine_id", w["wine_id"]).execute()
 
                         paired = st.session_state.get("pairing_result")
-                        if paired and int(paired["wine"]["wine_id"]) == int(
+                        if paired and str(paired["wine"]["wine_id"]) == str(
                             w["wine_id"]
                         ):
                             st.session_state.pop("pairing_result", None)
