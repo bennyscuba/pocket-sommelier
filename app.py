@@ -12,6 +12,7 @@ supabase: Client = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABAS
 
 # Define the structured data the AI must return
 class WineData(BaseModel):
+    wine_type: str = Field(description="Red, White, Rose, or Sparkling")
     producer: str = Field(description="The winery or estate")
     vintage: str = Field(description="The year, or 'NV' for non-vintage")
     varietal: str = Field(description="The grape or blend type")
@@ -41,7 +42,7 @@ if picture:
             img.save(img_byte_arr, format='JPEG')
             img_bytes = img_byte_arr.getvalue()
 
-            prompt = "Extract the producer, vintage, varietal, and region. Then, infer the flavor notes, tannin level, acidity, body type, and ideal drink window based on the wine's profile."
+            prompt = "Extract the wine type (Red, White, Rose, or Sparkling), producer, vintage, varietal, and region. Then, infer the flavor notes, tannin level, acidity, body type, and ideal drink window based on the wine's profile."
             
             response = genai_client.models.generate_content(
                 model='gemini-flash-latest',
@@ -69,11 +70,12 @@ if picture:
                     rack_loc = st.text_input("Rack Location", placeholder="e.g., Top row")
                     price = st.number_input("Purchase Price ($)", min_value=0.0, step=1.0, value=None)
                 with col2:
-                    source = st.text_input("Source", placeholder="e.g., Vin Rouge, Rue Cler")
+                    source = st.text_input("Source", placeholder="e.g., Rocks and Acid")
                 
                 submitted = st.form_submit_button("Save to Cellar")
                 if submitted:
                     supabase.table("wines").insert({
+                        "wine_type": data["wine_type"],
                         "producer": data["producer"],
                         "vintage": data["vintage"],
                         "varietal": data["varietal"],
