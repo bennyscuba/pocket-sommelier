@@ -1,43 +1,13 @@
 import streamlit as st
 import json
-from enum import Enum
 from google import genai
 from google.genai import types
-from pydantic import BaseModel, Field
 from supabase import create_client, Client
 from PIL import Image
 
 # Initialize API clients
 genai_client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 supabase: Client = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
-
-# Define the structured data the AI must return
-class WineType(str, Enum):
-    RED = "Red"
-    WHITE = "White"
-    ROSE = "Rose"
-    SPARKLING = "Sparkling"
-    OTHER = "Other"
-
-class QualityScore(int, Enum):
-    BOTTOM_SHELF = 1
-    MEDIOCRE = 2
-    WEEKDAY = 3
-    HIGH_QUALITY = 4
-    PREMIUM = 5
-
-class WineData(BaseModel):
-    wine_type: WineType
-    quality_score: QualityScore
-    producer: str = Field(description="The winery or estate")
-    vintage: str = Field(description="The year, or 'NV' for non-vintage")
-    varietal: str = Field(description="The grape or blend type")
-    region: str = Field(description="The geographic region")
-    flavor_notes: str = Field(description="3-4 distinct flavor notes")
-    tannin_level: str = Field(description="Low, Medium, or High")
-    acidity: str = Field(description="Low, Medium, or High")
-    body_type: str = Field(description="Light, Medium, or Full")
-    drink_window: str = Field(description="e.g., 'Drink Now' or 'Hold until 2028'")
 
 st.title("🍷 Pocket Sommelier")
 
@@ -48,10 +18,11 @@ with tab1:
     st.write("Scan a label to automatically extract and infer its profile.")
     picture = st.camera_input("Scan Wine Label")
     
-if picture:
+    if picture:
         with st.spinner("Analyzing label and inferring structural profile..."):
             img = Image.open(picture)
-
+            
+            # Drop the alpha channel to prevent malformed JPEGs
             if img.mode in ("RGBA", "P"):
                 img = img.convert("RGB")
                 
@@ -60,9 +31,25 @@ if picture:
             img.save(img_byte_arr, format='JPEG')
             img_bytes = img_byte_arr.getvalue()
 
-            prompt = "Extract the wine type (Red, White, Rose, or Sparkling), producer, vintage, varietal, and region. Then, infer the flavor notes, tannin level, acidity, body type, ideal drink window based on the wine's profile, and a 1-5 quality score (where 3 is a solid weekday wine and 5 is a premium special occasion bottle) based on the wine's profile and producer reputation."
+            prompt = """Analyze this wine label. 
+            Extract the wine type, producer, vintage, varietal, and region. 
+            Infer flavor notes, tannin level (Low, Medium, or High), acidity (Low, Medium, or High), body type (Light, Medium, or Full), drink window, and a quality score from 1-5 (1=bottom shelf, 3=good weekday, 5=special occasion).
+
+            You MUST return ONLY a raw JSON object with these exact keys. Do not use markdown blocks:
+            {
+                "wine_type": "text (Red, White, Rose, or Sparkling)",
+                "quality_score": integer,
+                "producer": "text",
+                "vintage": "text",
+                "varietal": "text",
+                "region": "text",
+                "flavor_notes": "text",
+                "tannin_level": "text",
+                "acidity": "text",
+                "body_type": "text",
+                "drink_window": "text"
+            }"""
             
-            # 2. Use the stable latest model and hardcoded image/jpeg
             response = genai_client.models.generate_content(
                 model='gemini-flash-latest',
                 contents=[
@@ -74,14 +61,13 @@ if picture:
                 ],
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
-                    response_schema=WineData,
                 ),
             )
             
             data = json.loads(response.text)
-            st.success(f"Identified: {data['vintage']} {data['producer']} {data['varietal']}")
+            st.success(f"Identified: {data.get('vintage')} {data.get('producer')} {data.get('varietal')}")
             
-            # Review and add manual logistics (allow blanks)
+            # Review and add manual logistics
             with st.form("add_wine_form"):
                 st.subheader("Optional Logistics")
                 col1, col2 = st.columns(2)
@@ -89,22 +75,23 @@ if picture:
                     rack_loc = st.text_input("Rack Location", placeholder="e.g., Top row")
                     price = st.number_input("Purchase Price ($)", min_value=0.0, step=1.0, value=None)
                 with col2:
-                    source = st.text_input("Source", placeholder="e.g., Rocks and Acid")
+                    source = st.text_input("Source", placeholder="e.g., Vin Rouge, Rue Cler")
                 
                 submitted = st.form_submit_button("Save to Cellar")
+                
                 if submitted:
                     supabase.table("wines").insert({
-                        "wine_type": data["wine_type"].value,
-                        "quality_score": data["quality_score"].value,
-                        "producer": data["producer"],
-                        "vintage": data["vintage"],
-                        "varietal": data["varietal"],
-                        "region": data["region"],
-                        "flavor_notes": data["flavor_notes"],
-                        "tannin_level": data["tannin_level"],
-                        "acidity": data["acidity"],
-                        "body_type": data["body_type"],
-                        "drink_window": data["drink_window"],
+                        "wine_type": data.get("wine_type", "Unknown"),
+                        "quality_score": int(data.get("quality_score", 3)),
+                        "producer": data.get("producer", "Unknown"),
+                        "vintage": data.get("vintage", "Unknown"),
+                        "varietal": data.get("varietal", "Unknown"),
+                        "region": data.get("region", "Unknown"),
+                        "flavor_notes": data.get("flavor_notes", "Unknown"),
+                        "tannin_level": data.get("tannin_level", "Unknown"),
+                        "acidity": data.get("acidity", "Unknown"),
+                        "body_type": data.get("body_type", "Unknown"),
+                        "drink_window": data.get("drink_window", "Unknown"),
                         "rack_location": rack_loc,
                         "source": source,
                         "purchase_price": price,
