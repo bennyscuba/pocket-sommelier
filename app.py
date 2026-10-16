@@ -2,12 +2,25 @@ import streamlit as st
 import json
 from google import genai
 from google.genai import types
+from pydantic import BaseModel, Field
 from supabase import create_client, Client
 from PIL import Image
 
 # Initialize API clients
 genai_client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 supabase: Client = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+
+# Define the structured data the AI must return
+class WineData(BaseModel):
+    producer: str = Field(description="The winery or estate")
+    vintage: str = Field(description="The year, or 'NV' for non-vintage")
+    varietal: str = Field(description="The grape or blend type")
+    region: str = Field(description="The geographic region")
+    flavor_notes: str = Field(description="3-4 distinct flavor notes")
+    tannin_level: str = Field(description="Low, Medium, or High")
+    acidity: str = Field(description="Low, Medium, or High")
+    body_type: str = Field(description="Light, Medium, or Full")
+    drink_window: str = Field(description="e.g., 'Drink Now' or 'Hold until 2028'")
 
 st.title("🍷 Pocket Sommelier")
 
@@ -21,54 +34,27 @@ with tab1:
     if picture:
         with st.spinner("Analyzing label and inferring structural profile..."):
             img = Image.open(picture)
-            
-            # Drop the alpha channel to prevent malformed JPEGs
-            if img.mode in ("RGBA", "P"):
-                img = img.convert("RGB")
-                
-            import io
-            img_byte_arr = io.BytesIO()
-            img.save(img_byte_arr, format='JPEG')
-            img_bytes = img_byte_arr.getvalue()
-
-            prompt = """Analyze this wine label image. 
-            Return ONLY a valid JSON object. Do not use markdown blocks, backticks, or conversational text. Use these exact keys:
-            {
-                "wine_type": "Red, White, Rose, or Sparkling",
-                "producer": "winery name",
-                "vintage": "year or NV",
-                "varietal": "grape or blend",
-                "region": "region",
-                "flavor_notes": "3-4 flavor notes",
-                "tannin_level": "Low, Medium, or High",
-                "acidity": "Low, Medium, or High",
-                "body_type": "Light, Medium, or Full",
-                "drink_window": "e.g. Drink Now"
-            }"""
+            prompt = "Extract the producer, vintage, varietal, and region. Then, infer the flavor notes, tannin level, acidity, body type, and ideal drink window based on the wine's profile."
             
             response = genai_client.models.generate_content(
-                model='gemini-flash-latest',
-                contents=[
-                    types.Part.from_bytes(
-                        data=img_bytes,
-                        mime_type='image/jpeg',
-                    ),
-                    prompt,
-                ],
-            )
+    model='gemini-flash-latest',  # <--- Change this line
+    contents=[
+        types.Part.from_bytes(
+            data=img_bytes,
+            mime_type='image/jpeg',
+        ),
+        prompt,
+    ],
+    config=types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_schema=WineData,
+    ),
+)
             
-            raw_text = response.text.strip()
-            if raw_text.startswith("```json"):
-                raw_text = raw_text[7:]
-            if raw_text.startswith("```"):
-                raw_text = raw_text[3:]
-            if raw_text.endswith("```"):
-                raw_text = raw_text[:-3]
-                
-            data = json.loads(raw_text.strip())
-            st.success(f"Identified: {data.get('vintage')} {data.get('producer')} {data.get('varietal')}")
+            data = json.loads(response.text)
+            st.success(f"Identified: {data['vintage']} {data['producer']} {data['varietal']}")
             
-            # Review and add manual logistics
+            # Review and add manual logistics (allow blanks)
             with st.form("add_wine_form"):
                 st.subheader("Optional Logistics")
                 col1, col2 = st.columns(2)
@@ -81,16 +67,15 @@ with tab1:
                 submitted = st.form_submit_button("Save to Cellar")
                 if submitted:
                     supabase.table("wines").insert({
-                        "wine_type": data.get("wine_type", "Unknown"),
-                        "producer": data.get("producer", "Unknown"),
-                        "vintage": data.get("vintage", "Unknown"),
-                        "varietal": data.get("varietal", "Unknown"),
-                        "region": data.get("region", "Unknown"),
-                        "flavor_notes": data.get("flavor_notes", "Unknown"),
-                        "tannin_level": data.get("tannin_level", "Unknown"),
-                        "acidity": data.get("acidity", "Unknown"),
-                        "body_type": data.get("body_type", "Unknown"),
-                        "drink_window": data.get("drink_window", "Unknown"),
+                        "producer": data["producer"],
+                        "vintage": data["vintage"],
+                        "varietal": data["varietal"],
+                        "region": data["region"],
+                        "flavor_notes": data["flavor_notes"],
+                        "tannin_level": data["tannin_level"],
+                        "acidity": data["acidity"],
+                        "body_type": data["body_type"],
+                        "drink_window": data["drink_window"],
                         "rack_location": rack_loc,
                         "source": source,
                         "purchase_price": price,
@@ -102,6 +87,7 @@ with tab1:
 with tab2:
     meal = st.text_input("What's on the menu?", placeholder="e.g., Smoked brisket, fresh fish ceviche, mushroom risotto")
     if st.button("Find Pairing") and meal:
+        # Fetch active inventory
         response = supabase.table("wines").select("*").eq("is_consumed", False).gt("quantity", 0).execute()
         inventory = response.data
         
@@ -109,6 +95,7 @@ with tab2:
             st.warning("Your rack is currently empty.")
         else:
             with st.spinner("Finding the perfect structural match..."):
+                # Pass structural metrics to the AI
                 inventory_str = "\n".join([f"- {w['vintage']} {w['producer']} {w['varietal']} | Tannins: {w['tannin_level']}, Acidity: {w['acidity']}, Body: {w['body_type']}, Notes: {w['flavor_notes']}" for w in inventory])
                 
                 pairing_prompt = f"I am cooking: {meal}. Here is my active wine inventory with their structural metrics:\n{inventory_str}\n\nRecommend the single best match. Explain why the acidity, tannins, and body pair well with the specific preparation of this dish."
@@ -122,6 +109,7 @@ with tab2:
 # --- TAB 3: MANAGE CELLAR ---
 with tab3:
     st.write("Log notes and update quantities after a meal.")
+    # Fetch active inventory to manage
     response = supabase.table("wines").select("*").eq("is_consumed", False).gt("quantity", 0).execute()
     wines = response.data
     
