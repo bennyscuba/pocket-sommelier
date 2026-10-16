@@ -1,5 +1,6 @@
 import streamlit as st
 import json
+from enum import Enum
 from google import genai
 from google.genai import types
 from pydantic import BaseModel, Field
@@ -11,9 +12,23 @@ genai_client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
 supabase: Client = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
 # Define the structured data the AI must return
+class WineType(str, Enum):
+    RED = "Red"
+    WHITE = "White"
+    ROSE = "Rose"
+    SPARKLING = "Sparkling"
+    OTHER = "Other"
+
+class QualityScore(int, Enum):
+    BOTTOM_SHELF = 1
+    MEDIOCRE = 2
+    WEEKDAY = 3
+    HIGH_QUALITY = 4
+    PREMIUM = 5
+
 class WineData(BaseModel):
-    wine_type: str = Field(description="Red, White, Rose, or Sparkling")
-    quality_score: int = Field(description="1-5 scale. 1=bottom shelf, 2=mediocre, 3=good weekday, 4=high quality for a great meal, 5=special occasion/premium.")
+    wine_type: WineType
+    quality_score: QualityScore
     producer: str = Field(description="The winery or estate")
     vintage: str = Field(description="The year, or 'NV' for non-vintage")
     varietal: str = Field(description="The grape or blend type")
@@ -79,8 +94,8 @@ if picture:
                 submitted = st.form_submit_button("Save to Cellar")
                 if submitted:
                     supabase.table("wines").insert({
-                        "wine_type": data["wine_type"],
-                        "quality_score": int(data["quality_score"]),
+                        "wine_type": data["wine_type"].value,
+                        "quality_score": data["quality_score"].value,
                         "producer": data["producer"],
                         "vintage": data["vintage"],
                         "varietal": data["varietal"],
