@@ -34,6 +34,12 @@ with tab1:
     if picture:
         with st.spinner("Analyzing label and inferring structural profile..."):
             img = Image.open(picture)
+            
+            # Convert PIL image to JPEG bytes for google-genai SDK
+            import io
+            img_byte_arr = io.BytesIO()
+            img.save(img_byte_arr, format='JPEG')
+            img_bytes = img_byte_arr.getvalue()
             prompt = "Extract the producer, vintage, varietal, and region. Then, infer the flavor notes, tannin level, acidity, body type, and ideal drink window based on the wine's profile."
             
             response = genai_client.models.generate_content(
