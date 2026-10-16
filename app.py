@@ -34,9 +34,8 @@ with tab1:
     
 if picture:
         with st.spinner("Analyzing label and inferring structural profile..."):
+            # 1. Sanitize the mobile camera capture into a perfect, clean JPEG
             img = Image.open(picture)
-            
-            # Convert PIL image to JPEG bytes for google-genai SDK
             import io
             img_byte_arr = io.BytesIO()
             img.save(img_byte_arr, format='JPEG')
@@ -44,12 +43,13 @@ if picture:
 
             prompt = "Extract the wine type (Red, White, Rose, or Sparkling), producer, vintage, varietal, and region. Then, infer the flavor notes, tannin level, acidity, body type, and ideal drink window based on the wine's profile."
             
+            # 2. Use the stable latest model and hardcoded image/jpeg
             response = genai_client.models.generate_content(
-                model='gemini-1.5-flash',
+                model='gemini-flash-latest',
                 contents=[
                     types.Part.from_bytes(
                         data=img_bytes,
-                        mime_type='picture.type',
+                        mime_type='image/jpeg',
                     ),
                     prompt,
                 ],
@@ -110,7 +110,7 @@ with tab2:
                 pairing_prompt = f"I am cooking: {meal}. Here is my active wine inventory with their structural metrics:\n{inventory_str}\n\nRecommend the single best match. Explain why the acidity, tannins, and body pair well with the specific preparation of this dish."
                 
                 pairing_response = genai_client.models.generate_content(
-                    model='gemini-1.5-flash',
+                    model='gemini-flash-latest',
                     contents=pairing_prompt,
                 )
                 st.write(pairing_response.text)
