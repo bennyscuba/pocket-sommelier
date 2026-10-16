@@ -31,25 +31,23 @@ with tab1:
             img.save(img_byte_arr, format='JPEG')
             img_bytes = img_byte_arr.getvalue()
 
-            prompt = """Analyze this wine label. 
-            Extract the wine type, producer, vintage, varietal, and region. 
-            Infer flavor notes, tannin level (Low, Medium, or High), acidity (Low, Medium, or High), body type (Light, Medium, or Full), drink window, and a quality score from 1-5 (1=bottom shelf, 3=good weekday, 5=special occasion).
-
-            You MUST return ONLY a raw JSON object with these exact keys. Do not use markdown blocks:
+            prompt = """Analyze this wine label image. 
+            Return ONLY a valid JSON object. Do not use markdown blocks, backticks, or conversational text. Use these exact keys:
             {
-                "wine_type": "text (Red, White, Rose, or Sparkling)",
-                "quality_score": integer,
-                "producer": "text",
-                "vintage": "text",
-                "varietal": "text",
-                "region": "text",
-                "flavor_notes": "text",
-                "tannin_level": "text",
-                "acidity": "text",
-                "body_type": "text",
-                "drink_window": "text"
+                "wine_type": "Red, White, Rose, or Sparkling",
+                "quality_score": 3,
+                "producer": "winery name",
+                "vintage": "year or NV",
+                "varietal": "grape or blend",
+                "region": "region",
+                "flavor_notes": "3-4 flavor notes",
+                "tannin_level": "Low, Medium, or High",
+                "acidity": "Low, Medium, or High",
+                "body_type": "Light, Medium, or Full",
+                "drink_window": "e.g. Drink Now"
             }"""
             
+            # Pure text call — no fragile schemas or config mime types to trigger 400/500 errors
             response = genai_client.models.generate_content(
                 model='gemini-flash-latest',
                 contents=[
@@ -59,15 +57,21 @@ with tab1:
                     ),
                     prompt,
                 ],
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                ),
             )
             
-            data = json.loads(response.text)
+            # Clean any accidental markdown formatting and parse locally
+            raw_text = response.text.strip()
+            if raw_text.startswith("```json"):
+                raw_text = raw_text[7:]
+            if raw_text.startswith("```"):
+                raw_text = raw_text[3:]
+            if raw_text.endswith("```"):
+                raw_text = raw_text[:-3]
+                
+            data = json.loads(raw_text.strip())
             st.success(f"Identified: {data.get('vintage')} {data.get('producer')} {data.get('varietal')}")
             
-            # Review and add manual logistics
+            # Review and add manual logistics (allow blanks)
             with st.form("add_wine_form"):
                 st.subheader("Optional Logistics")
                 col1, col2 = st.columns(2)
@@ -78,7 +82,6 @@ with tab1:
                     source = st.text_input("Source", placeholder="e.g., Vin Rouge, Rue Cler")
                 
                 submitted = st.form_submit_button("Save to Cellar")
-                
                 if submitted:
                     supabase.table("wines").insert({
                         "wine_type": data.get("wine_type", "Unknown"),
