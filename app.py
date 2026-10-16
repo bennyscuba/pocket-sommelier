@@ -34,8 +34,11 @@ with tab1:
     
 if picture:
         with st.spinner("Analyzing label and inferring structural profile..."):
-            # 1. Sanitize the mobile camera capture into a perfect, clean JPEG
             img = Image.open(picture)
+
+            if img.mode in ("RGBA", "P"):
+                img = img.convert("RGB")
+                
             import io
             img_byte_arr = io.BytesIO()
             img.save(img_byte_arr, format='JPEG')
