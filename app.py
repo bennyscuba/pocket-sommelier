@@ -37,12 +37,12 @@ with tab1:
             prompt = "Extract the producer, vintage, varietal, and region. Then, infer the flavor notes, tannin level, acidity, body type, and ideal drink window based on the wine's profile."
             
             response = genai_client.models.generate_content(
-    model='gemini-flash-latest',  # <--- Change this line
-    contents=[
-        types.Part.from_bytes(
-            data=img_bytes,
-            mime_type='image/jpeg',
-        ),
+                model='gemini-flash-latest',  # <--- Change this line
+                contents=[
+                    types.Part.from_bytes(
+                        data=img_bytes,
+                        mime_type='image/jpeg',
+                    ),
         prompt,
     ],
     config=types.GenerateContentConfig(
