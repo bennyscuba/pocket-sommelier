@@ -12,6 +12,7 @@ supabase: Client = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABAS
 
 # Define the structured data the AI must return
 class WineData(BaseModel):
+    wine_type: str = Field(description="Red, White, Rose, or Sparkling")
     producer: str = Field(description="The winery or estate")
     vintage: str = Field(description="The year, or 'NV' for non-vintage")
     varietal: str = Field(description="The grape or blend type")
@@ -77,6 +78,7 @@ if picture:
                 submitted = st.form_submit_button("Save to Cellar")
                 if submitted:
                     supabase.table("wines").insert({
+                        "wine_type": data["wine_type"],
                         "producer": data["producer"],
                         "vintage": data["vintage"],
                         "varietal": data["varietal"],
