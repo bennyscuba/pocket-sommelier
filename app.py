@@ -277,21 +277,20 @@ with tab1:
 with tab2:
     st.subheader("🍷 Find a Wine")
     st.write(
-        "Describe what you want, or use the optional filters. You can search for "
-        "a meal pairing, a level 4 red, an acidic white, or simply something ready to drink."
+        "Search Supabase first using strict cellar filters. Gemini is only called "
+        "if you explicitly ask the sommelier to choose among the matching bottles."
     )
 
     request_text = st.text_area(
-        "What are you looking for?",
+        "Optional preference or meal",
         placeholder=(
-            "Examples: a white with good acidity; a level 4 red; something for sushi; "
-            "a lighter wine that is ready to drink"
+            "Examples: good acidity; medium-bodied and not too tannic; sushi; "
+            "ready to drink tonight"
         ),
         key="wine_request",
     )
 
     filter_col1, filter_col2 = st.columns(2)
-
     with filter_col1:
         quality_group = st.selectbox(
             "Quality",
@@ -302,14 +301,11 @@ with tab2:
                 "5 - Exceptional / special occasion",
                 "1-2 - Lower-rated bottles",
             ],
-            help="A selected quality is a strict filter. The default searches all levels.",
         )
-
     with filter_col2:
         wine_type_filter = st.selectbox(
             "Wine type",
             ["Any type", "Red", "White", "Rose", "Sparkling"],
-            help="A selected wine type is a strict filter.",
         )
 
     quality_map = {
@@ -320,37 +316,103 @@ with tab2:
     }
 
     if st.button("Search My Cellar", type="primary"):
-        if (
-            not request_text.strip()
-            and quality_group == "Any quality"
-            and wine_type_filter == "Any type"
-        ):
-            st.warning("Describe what you want or choose at least one filter.")
+        try:
+            query = (
+                supabase.table("wines")
+                .select("*")
+                .eq("is_consumed", False)
+                .gt("quantity", 0)
+            )
+
+            if quality_group != "Any quality":
+                query = query.in_("quality_score", quality_map[quality_group])
+            if wine_type_filter != "Any type":
+                query = query.eq("wine_type", wine_type_filter)
+
+            response = query.execute()
+            matches = response.data
+
+            # Apply exact structured preferences locally without using Gemini.
+            preference = request_text.strip().lower()
+            if preference:
+                if "high acidity" in preference or "good acidity" in preference:
+                    matches = [w for w in matches if w.get("acidity") == "High"]
+                elif "medium acidity" in preference:
+                    matches = [w for w in matches if w.get("acidity") == "Medium"]
+                elif "low acidity" in preference:
+                    matches = [w for w in matches if w.get("acidity") == "Low"]
+
+                if "full-bodied" in preference or "full bodied" in preference:
+                    matches = [w for w in matches if w.get("body_type") == "Full"]
+                elif "medium-bodied" in preference or "medium bodied" in preference:
+                    matches = [w for w in matches if w.get("body_type") == "Medium"]
+                elif "light-bodied" in preference or "light bodied" in preference:
+                    matches = [w for w in matches if w.get("body_type") == "Light"]
+
+                if "high tannin" in preference:
+                    matches = [w for w in matches if w.get("tannin_level") == "High"]
+                elif "medium tannin" in preference:
+                    matches = [w for w in matches if w.get("tannin_level") == "Medium"]
+                elif "low tannin" in preference or "not too tannic" in preference:
+                    matches = [w for w in matches if w.get("tannin_level") == "Low"]
+
+            matches = sorted(
+                matches,
+                key=lambda w: (
+                    -(int(w.get("quality_score") or 0)),
+                    str(w.get("producer") or ""),
+                    str(w.get("vintage") or ""),
+                ),
+            )
+            st.session_state["cellar_matches"] = matches
+            st.session_state["cellar_search_request"] = request_text.strip()
+            st.session_state["cellar_search_quality"] = quality_group
+            st.session_state["cellar_search_type"] = wine_type_filter
+            st.session_state.pop("pairing_result", None)
+
+        except Exception as exc:
+            st.error("The cellar search failed.")
+            st.code(f"{type(exc).__name__}: {exc}")
+
+    matches = st.session_state.get("cellar_matches")
+    if matches is not None:
+        if not matches:
+            st.warning(
+                "No available bottles matched those filters. Try broadening the "
+                "quality, wine type, or structured preference."
+            )
         else:
-            try:
-                query = (
-                    supabase.table("wines")
-                    .select("*")
-                    .eq("is_consumed", False)
-                    .gt("quantity", 0)
-                )
+            st.markdown("---")
+            st.subheader(f"Matching Bottles ({len(matches)})")
+            st.caption("These results came directly from Supabase. No Gemini call was used.")
 
-                if quality_group != "Any quality":
-                    query = query.in_("quality_score", quality_map[quality_group])
-
-                if wine_type_filter != "Any type":
-                    query = query.eq("wine_type", wine_type_filter)
-
-                response = query.execute()
-                inventory = response.data
-
-                if not inventory:
-                    st.warning(
-                        "No available bottles match those strict filters. "
-                        "Try broadening the quality or wine type."
+            for w in matches:
+                with st.expander(
+                    f"{w['vintage']} {w['producer']} {w['varietal']} "
+                    f"| Quality {w['quality_score']}"
+                ):
+                    st.write(f"**Type:** {w['wine_type']} | **Region:** {w['region']}")
+                    st.write(
+                        f"**Profile:** {w['body_type']} body | "
+                        f"{w['acidity']} acidity | {w['tannin_level']} tannin"
                     )
-                    st.session_state.pop("pairing_result", None)
-                else:
+                    st.write(f"**Notes:** {w['flavor_notes']}")
+                    st.write(f"**Drink window:** {w['drink_window']}")
+                    st.write(
+                        f"**Location:** {w.get('rack_location') or 'Unassigned'} | "
+                        f"**Quantity:** {w['quantity']}"
+                    )
+                    minutes = int(w.get("decant_minutes") or 0)
+                    st.write(
+                        "**Decant:** None recommended"
+                        if minutes == 0
+                        else f"**Decant:** {minutes} minutes"
+                    )
+
+            if len(matches) == 1:
+                st.info("Only one bottle matched, so an AI recommendation is unnecessary.")
+            elif st.button("Ask Sommelier to Choose One"):
+                try:
                     inventory_str = "\n\n".join(
                         [
                             (
@@ -363,128 +425,82 @@ with tab2:
                                 f"Acidity: {w['acidity']}\n"
                                 f"Body: {w['body_type']}\n"
                                 f"Flavor notes: {w['flavor_notes']}\n"
-                                f"Drink window: {w['drink_window']}\n"
-                                f"Stored decant recommendation: "
-                                f"{w.get('decant_minutes', 0)} minutes\n"
-                                f"Quantity: {w['quantity']}"
+                                f"Drink window: {w['drink_window']}"
                             )
-                            for w in inventory
+                            for w in matches
                         ]
                     )
-
-                    user_request = request_text.strip() or (
-                        "Select the best bottle from the filtered inventory."
+                    user_request = (
+                        st.session_state.get("cellar_search_request")
+                        or "Choose the most appropriate bottle for drinking now."
                     )
+                    prompt = f"""
+                    Choose one wine from the filtered cellar results.
 
-                    recommendation_prompt = f"""
-                    You are a personal sommelier searching a user's wine cellar.
-
-                    USER REQUEST:
+                    USER PREFERENCE OR MEAL:
                     {user_request}
-
-                    STRICT FILTERS ALREADY APPLIED:
-                    Quality: {quality_group}
-                    Wine type: {wine_type_filter}
 
                     AVAILABLE WINES:
                     {inventory_str}
 
-                    Choose the single wine that best satisfies the user's request.
-                    You must choose one exact WINE ID listed above. Never recommend a
-                    wine outside this inventory.
-
-                    Treat the selected quality and wine-type filters as mandatory.
-                    Interpret the free-text request flexibly. It may describe a meal,
-                    acidity, tannin, body, color, drinking window, occasion, or general
-                    preference. If it describes food, evaluate pairing structure. If it
-                    describes wine characteristics, match those characteristics directly.
-
-                    Ignore monetary value and prestige. Purchase prices are intentionally
-                    unavailable. Explain briefly why the selected bottle best fits the
-                    request and provide an appropriate serving temperature.
+                    Select one exact WINE ID from the list. Match food structure when
+                    a meal is provided; otherwise match the requested acidity, tannin,
+                    body, flavor, occasion, or readiness. Ignore price and prestige.
+                    Explain briefly why it is the best match and give a serving temperature.
                     """
-
-                    with st.spinner("Searching your cellar..."):
-                        recommendation_response = genai_client.models.generate_content(
+                    with st.spinner("Asking the sommelier to choose..."):
+                        ai_response = genai_client.models.generate_content(
                             model="gemini-flash-latest",
-                            contents=recommendation_prompt,
+                            contents=prompt,
                             config=types.GenerateContentConfig(
                                 response_mime_type="application/json",
                                 response_schema=PairingRecommendation,
                                 temperature=0.1,
                             ),
                         )
-
                     recommendation = PairingRecommendation.model_validate_json(
-                        recommendation_response.text
+                        ai_response.text
                     )
-
-                    selected_wine = next(
+                    selected = next(
                         (
-                            w
-                            for w in inventory
+                            w for w in matches
                             if int(w["wine_id"]) == int(recommendation.wine_id)
                         ),
                         None,
                     )
-
-                    if selected_wine is None:
-                        st.error(
-                            "The sommelier selected a wine outside the filtered results. "
-                            "Please try the search again."
-                        )
+                    if selected is None:
+                        st.error("The model selected a wine outside the search results.")
                     else:
                         st.session_state["pairing_result"] = {
-                            "wine": selected_wine,
+                            "wine": selected,
                             "reason": recommendation.reason,
                             "temperature": recommendation.serving_temperature,
-                            "request": user_request,
-                            "quality_group": quality_group,
-                            "wine_type_filter": wine_type_filter,
                         }
-
-            except ValidationError as exc:
-                st.error("Gemini returned a recommendation that did not match the schema.")
-                st.code(str(exc))
-            except Exception as exc:
-                st.error("I couldn't search the cellar.")
-                st.code(f"{type(exc).__name__}: {exc}")
+                        st.rerun()
+                except ValidationError as exc:
+                    st.error("The recommendation did not match the expected schema.")
+                    st.code(str(exc))
+                except Exception as exc:
+                    st.error("The AI recommendation failed.")
+                    st.code(f"{type(exc).__name__}: {exc}")
 
     if "pairing_result" in st.session_state:
         result = st.session_state["pairing_result"]
         wine = result["wine"]
-
         st.markdown("---")
-        st.subheader("My Recommendation")
-        st.caption(
-            f"Request: {result['request']} | Quality: {result['quality_group']} | "
-            f"Type: {result['wine_type_filter']}"
-        )
+        st.subheader("Sommelier's Choice")
         st.markdown(
             f"### {wine['vintage']} {wine['producer']} {wine['varietal']}"
         )
-        st.write(f"**Type:** {wine['wine_type']}")
-        st.write(f"**Region:** {wine['region']}")
-        st.write(f"**Quality:** {quality_label(int(wine['quality_score']))}")
-        st.write(
-            f"**Profile:** {wine['body_type']} body | "
-            f"{wine['acidity']} acidity | {wine['tannin_level']} tannin"
-        )
-        st.write(
-            f"📍 **Cellar Location:** {wine.get('rack_location') or 'Unassigned'}"
-        )
-        st.write(f"🍾 **Bottles Remaining:** {wine['quantity']}")
-
-        st.markdown("#### Why this bottle")
         st.write(result["reason"])
-
-        st.markdown("#### Serving Recommendation")
         st.write(f"🌡️ **Temperature:** {result['temperature']}")
-        decant_minutes = int(wine.get("decant_minutes") or 0)
-        if decant_minutes == 0:
-            st.write("⏱️ **Decant:** No decant recommended")
-        else:
-            st.write(f"⏱️ **Decant:** {decant_minutes} minutes")
+        minutes = int(wine.get("decant_minutes") or 0)
+        st.write(
+            "⏱️ **Decant:** No decant recommended"
+            if minutes == 0
+            else f"⏱️ **Decant:** {minutes} minutes"
+        )
+        st.write(f"📍 **Location:** {wine.get('rack_location') or 'Unassigned'}")
 
 
 # -----------------------------------------------------------------------------
