@@ -80,7 +80,7 @@ if picture:
                 if submitted:
                     supabase.table("wines").insert({
                         "wine_type": data["wine_type"],
-                        "quality_score": data["quality_score"],
+                        "quality_score": int(data["quality_score"]),
                         "producer": data["producer"],
                         "vintage": data["vintage"],
                         "varietal": data["varietal"],
