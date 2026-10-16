@@ -37,7 +37,7 @@ with tab1:
             prompt = "Extract the producer, vintage, varietal, and region. Then, infer the flavor notes, tannin level, acidity, body type, and ideal drink window based on the wine's profile."
             
             response = genai_client.models.generate_content(
-                model='gemini-2.5-flash',
+                model='gemini-1.5-flash',
                 contents=[img, prompt],
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
@@ -95,7 +95,7 @@ with tab2:
                 pairing_prompt = f"I am cooking: {meal}. Here is my active wine inventory with their structural metrics:\n{inventory_str}\n\nRecommend the single best match. Explain why the acidity, tannins, and body pair well with the specific preparation of this dish."
                 
                 pairing_response = genai_client.models.generate_content(
-                    model='gemini-2.5-flash',
+                    model='gemini-1.5-flash',
                     contents=pairing_prompt,
                 )
                 st.write(pairing_response.text)
